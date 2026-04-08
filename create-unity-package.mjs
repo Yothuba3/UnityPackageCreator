@@ -5,7 +5,7 @@
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { writeFileSync, existsSync, statSync, readFileSync } from "node:fs";
-import { resolve, join, dirname } from "node:path";
+import { resolve, join, dirname, relative } from "node:path";
 import { execSync } from "node:child_process";
 
 // ─── Debug ──────────────────────────────────────────────────────────────────
@@ -160,11 +160,14 @@ function previewReadme(md) {
 }
 
 // ─── README builder ───────────────────────────────────────────────────────────
-function buildReadme({ displayName, description, name, version, remoteUrl }) {
+function buildReadme({ displayName, description, name, version, remoteUrl, pkgRelPath }) {
   const httpsUrl = normalizeGitUrl(remoteUrl);
-  const upmUrl   = httpsUrl
-    ? `${httpsUrl.replace(/\.git$/, "")}.git#${version}`
-    : `https://github.com/your-org/your-repo.git#${version}`;
+  const base = httpsUrl
+    ? `${httpsUrl.replace(/\.git$/, "")}.git`
+    : `https://github.com/your-org/your-repo.git`;
+  // UPM Git URL: <repo>.git[?path=/sub/dir]#<revision>  ?path= は # の前
+  const pathQuery = pkgRelPath ? `?path=/${pkgRelPath}` : "";
+  const upmUrl   = `${base}${pathQuery}#${version}`;
 
   const descBlock = description ? `\n${description}\n` : "";
   const repoBlock = httpsUrl ? [`## Repository`, ``, httpsUrl, ``] : [];
@@ -207,6 +210,20 @@ async function main() {
   const gitRoot   = getGitRoot(outDir);
   const remoteUrl = gitRoot ? getGitRemoteUrl(gitRoot) : null;
   const isGit     = !!gitRoot;
+
+  // gitRoot からの相対パス (POSIX)。空ならパッケージはリポジトリ直下
+  let pkgRelPath = "";
+  let isInsideRepo = isGit;
+  if (isGit) {
+    const rel = relative(gitRoot, outDir).replace(/\\/g, "/");
+    if (rel === "" || rel === ".") {
+      pkgRelPath = "";
+    } else if (rel.startsWith("..")) {
+      isInsideRepo = false;  // outDir が gitRoot の外
+    } else {
+      pkgRelPath = rel;
+    }
+  }
 
   if (isGit) {
     console.log(`  ${green("✔")} Git リポジトリを検出 ${dim(gitRoot)}`);
@@ -284,22 +301,29 @@ async function main() {
   let readmePath     = null;
   let readmeContent  = null;
 
-  if (isGit) {
+  if (isInsideRepo) {
     section("README  UPM インポート用 README の生成");
-    hint("Git URL を使ったインストール手順を含む README.md を生成します");
+    if (pkgRelPath) {
+      hint(`README はリポジトリ直下に生成し、UPM URL に ?path=/${pkgRelPath} を含めます`);
+    } else {
+      hint("Git URL を使ったインストール手順を含む README.md を生成します");
+    }
     generateReadme = await confirm(rl, "README を生成しますか？", true);
 
     if (generateReadme) {
-      readmeContent = buildReadme({ displayName, description, name, version, remoteUrl });
-      const defaultReadmePath = join(outDir, "README.md");
+      readmeContent = buildReadme({ displayName, description, name, version, remoteUrl, pkgRelPath });
+      const defaultReadmePath = join(gitRoot, "README.md");
       if (existsSync(defaultReadmePath)) {
         console.log(`  ${yellow("⚠")}  README.md が既に存在するため README.upm.md として保存します`);
-        readmePath = join(outDir, "README.upm.md");
+        readmePath = join(gitRoot, "README.upm.md");
       } else {
         readmePath = defaultReadmePath;
       }
       previewReadme(readmeContent);
     }
+  } else if (isGit) {
+    console.log();
+    console.log(`  ${yellow("⚠")}  outDir が Git リポジトリ外のため README は生成しません`);
   }
 
   // Preview & confirm
