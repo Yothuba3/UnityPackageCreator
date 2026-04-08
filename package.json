@@ -1,0 +1,20 @@
+{
+  "name": "unity-package-creator",
+  "version": "1.0.0",
+  "description": "Interactive CLI to generate Unity package.json and UPM README",
+  "type": "module",
+  "bin": {
+    "create-unity-package": "./create-unity-package.mjs"
+  },
+  "files": [
+    "create-unity-package.mjs"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yothuba3/UnityPackageCreator.git"
+  },
+  "license": "MIT"
+}
