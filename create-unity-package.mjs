@@ -4,9 +4,13 @@
 
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { writeFileSync, existsSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { writeFileSync, existsSync, statSync, readFileSync } from "node:fs";
+import { resolve, join, dirname } from "node:path";
 import { execSync } from "node:child_process";
+
+// ─── Debug ──────────────────────────────────────────────────────────────────
+const DEBUG = !!process.env.UPC_DEBUG;
+let gitDetectError = null;
 
 // ─── ANSI colors ────────────────────────────────────────────────────────────
 const c = {
@@ -23,11 +27,42 @@ const red    = (s) => `${c.red}${s}${c.reset}`;
 const blue   = (s) => `${c.blue}${s}${c.reset}`;
 
 // ─── Git helpers ─────────────────────────────────────────────────────────────
+// git コマンドに依存しないよう .git ディレクトリを親方向に探索する
+function findGitRootByFs(startDir) {
+  let cur = resolve(startDir);
+  while (true) {
+    const candidate = join(cur, ".git");
+    try {
+      if (statSync(candidate)) return cur;
+    } catch { /* ignore */ }
+    const parent = dirname(cur);
+    if (parent === cur) return null;
+    cur = parent;
+  }
+}
+
 function getGitRoot(dir) {
+  // 1st: git CLI
   try {
     return execSync("git rev-parse --show-toplevel", {
       cwd: dir, stdio: ["pipe","pipe","pipe"],
     }).toString().trim();
+  } catch (e) {
+    gitDetectError = e.message;
+  }
+  // 2nd: fs フォールバック
+  return findGitRootByFs(dir);
+}
+
+// .git/config を直接パースして origin の URL を取り出すフォールバック
+function parseOriginFromGitConfig(gitRoot) {
+  try {
+    const cfg = readFileSync(join(gitRoot, ".git", "config"), "utf-8");
+    // [remote "origin"] ブロックを探す
+    const m = cfg.match(/\[remote "origin"\]([^\[]*)/);
+    if (!m) return null;
+    const urlMatch = m[1].match(/^\s*url\s*=\s*(.+)$/m);
+    return urlMatch ? urlMatch[1].trim() : null;
   } catch { return null; }
 }
 
@@ -36,7 +71,8 @@ function getGitRemoteUrl(dir) {
     return execSync("git remote get-url origin", {
       cwd: dir, stdio: ["pipe","pipe","pipe"],
     }).toString().trim();
-  } catch { return null; }
+  } catch { /* fall through */ }
+  return parseOriginFromGitConfig(dir);
 }
 
 function normalizeGitUrl(url) {
@@ -173,11 +209,19 @@ async function main() {
   const isGit     = !!gitRoot;
 
   if (isGit) {
-    console.log(`  ${green("✔")} Git リポジトリを検出`);
+    console.log(`  ${green("✔")} Git リポジトリを検出 ${dim(gitRoot)}`);
     if (remoteUrl) {
       console.log(`    ${dim("origin: " + normalizeGitUrl(remoteUrl))}`);
     } else {
       console.log(`    ${yellow("⚠")}  origin が未設定です（README の URL は仮のものになります）`);
+    }
+  } else {
+    console.log(`  ${yellow("⚠")}  Git リポジトリではありません（README 生成はスキップされます）`);
+    console.log(`    ${dim("cwd: " + outDir)}`);
+    if (DEBUG && gitDetectError) {
+      console.log(`    ${dim("git error: " + gitDetectError)}`);
+    } else if (gitDetectError) {
+      console.log(`    ${dim("UPC_DEBUG=1 で git エラー詳細を表示します")}`);
     }
   }
 
