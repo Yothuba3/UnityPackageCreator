@@ -75,6 +75,11 @@ function validate(value, rule) {
     if (!/^\d+\.\d+\.\d+$/.test(value))
       return "形式: 1.0.0（セマンティックバージョニング）";
   }
+  if (rule === "unityVersion") {
+    if (!value.trim()) return "必須項目です";
+    if (!/^\d{4}\.\d+$/.test(value))
+      return "形式: 2022.3（MAJOR.MINOR）";
+  }
   return null;
 }
 
@@ -177,35 +182,58 @@ async function main() {
   }
 
   // Step 1: name
-  section("1 / 4  パッケージ名");
+  section("1 / 7  パッケージ名");
   hint("Unity の命名規則: com.{company}.{package-name}");
   const name = await ask(rl, "name", {
     rule: "packageName", defaultValue: "com.company.my-package",
   });
 
   // Step 2: version
-  section("2 / 4  バージョン");
+  section("2 / 7  バージョン");
   const version = await ask(rl, "version", {
     rule: "version", defaultValue: "1.0.0",
     hint: "セマンティックバージョニング (MAJOR.MINOR.PATCH)",
   });
 
   // Step 3: displayName
-  section("3 / 4  表示名");
+  section("3 / 7  表示名");
   hint("Package Manager UI に表示される名前です");
   const displayName = await ask(rl, "displayName", {
     rule: "required", defaultValue: "My Package",
   });
 
   // Step 4: description
-  section("4 / 4  説明");
+  section("4 / 7  説明");
   const description = await ask(rl, "description", {
     defaultValue: "", hint: "省略可（Enter でスキップ）",
   });
 
-  // Build package.json
+  // Step 5: unity version
+  section("5 / 7  対応 Unity バージョン");
+  hint("パッケージが動作する最小 Unity バージョン (MAJOR.MINOR)");
+  const unity = await ask(rl, "unity", {
+    rule: "unityVersion", defaultValue: "2022.3",
+  });
+
+  // Step 6: author
+  section("6 / 7  作者");
+  const author = await ask(rl, "author", {
+    defaultValue: "", hint: "省略可（Enter でスキップ）",
+  });
+
+  // Step 7: license
+  section("7 / 7  ライセンス");
+  const license = await ask(rl, "license", {
+    defaultValue: "MIT", hint: "SPDX 識別子 (例: MIT, Apache-2.0)",
+  });
+
+  // Build package.json (UPM が参照する順序で出力)
   const pkg = { name, version, displayName };
   if (description) pkg.description = description;
+  pkg.unity = unity;
+  if (author) pkg.author = author;
+  pkg.license = license;
+  pkg.dependencies = {};
 
   // README オプション（Git リポジトリ内のみ）
   let generateReadme = false;
@@ -240,7 +268,7 @@ async function main() {
   const doSave = await confirm(
     rl,
     pkgExists ? "上書きして保存しますか？" : "保存しますか？",
-    false
+    !pkgExists
   );
   rl.close();
 
